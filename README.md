@@ -19,5 +19,7 @@
 
     MuliDex在安装dex2、dexN时，会先将dex文件从apk中解压出来，再压缩成一个dexN.zip包，再将这个
     Zip文件追加到classloader，使用此项目后可以省去解压和压缩过程，达到提速目的。
+    
+Zip文件格式参考：http://blog.sina.com.cn/s/blog_4c3591bd0100zzm6.html
 
 
