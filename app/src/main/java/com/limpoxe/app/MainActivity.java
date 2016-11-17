@@ -23,7 +23,7 @@ public class MainActivity extends AppCompatActivity {
         String zipFile = getApplicationInfo().sourceDir;
         String fileInZip = "classes.dex";
         String targetZipFile = getApplicationInfo().dataDir + "/classes.dex.zip";
-        File dexZip = ZipSpliter.split(zipFile, fileInZip, targetZipFile);
+        File dexZip = ZipSpliter.split(zipFile, fileInZip, targetZipFile, "classes.dex");
 
         boolean isValid = dexZip != null && checkValidate(targetZipFile);
 
