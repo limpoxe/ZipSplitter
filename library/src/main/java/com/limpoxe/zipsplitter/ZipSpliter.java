@@ -31,7 +31,7 @@ public class ZipSpliter {
 
     private static final int GPBF_UNSUPPORTED_MASK = GPBF_ENCRYPTED_FLAG;
 
-    public static File split(String srcZipFile, String fileInSrcZipFile, String targetZipFile) {
+    public static File split(String srcZip, String fileInSrcZip, String targetZip, String fileInTargetZip) {
 
         RandomAccessFile raf = null;
         EOF eof = null;
@@ -39,10 +39,10 @@ public class ZipSpliter {
         FileEntry fileEntry = null;
 
         try {
-            raf = new RandomAccessFile(srcZipFile, "r");
+            raf = new RandomAccessFile(srcZip, "r");
             long eocdOffset = findIndexOfEOF(raf);
             eof = readEocdRecord(raf, eocdOffset);
-            centralDir = findCentralDir(raf, eof.centralDirOffset, eof.numberOfEntry, fileInSrcZipFile);
+            centralDir = findCentralDir(raf, eof.centralDirOffset, eof.numberOfEntry, fileInSrcZip);
             fileEntry = readFileEntry(raf, centralDir.localHeaderRelOffset);
         } catch (Exception e) {
             e.printStackTrace();
@@ -57,12 +57,12 @@ public class ZipSpliter {
         }
 
         if (fileEntry != null && centralDir != null && eof != null) {
-            return writeZip(fileEntry, centralDir, eof, targetZipFile);
+            return writeZip(fileEntry, centralDir, eof, targetZip, fileInTargetZip);
         }
         return null;
     }
 
-    private static File writeZip(FileEntry fileEntry, CentralDir centralDir, EOF eof, String targetZipFile) {
+    private static File writeZip(FileEntry fileEntry, CentralDir centralDir, EOF eof, String targetZipFile, String fileInTargetZip) {
 
         try {
             File dest = new File(targetZipFile);
@@ -72,8 +72,8 @@ public class ZipSpliter {
 
             FileOutputStream fileOutputStream = new FileOutputStream(dest);
 
-            writeLocalFile(fileOutputStream, fileEntry);
-            writeCentralDir(fileOutputStream, centralDir);
+            writeLocalFile(fileOutputStream, fileEntry, fileInTargetZip);
+            writeCentralDir(fileOutputStream, centralDir, fileInTargetZip);
             writeEndOfCentralDirRecord(fileOutputStream, eof,
                     centralDir.size,//由于是单文件，因此核心目录的大小就是1个目录的大小
                     fileEntry.size//由于是单文件，因此核心目录起始位移大小就是1个文件数据的大小
@@ -90,9 +90,19 @@ public class ZipSpliter {
         return null;
     }
 
-    private static void writeLocalFile(FileOutputStream fileOutputStream, FileEntry fileEntry) throws IOException {
+    private static void writeLocalFile(FileOutputStream fileOutputStream, FileEntry fileEntry, String fileName) throws IOException {
+
+        //修正文件名长度
+        byte[] newName = fileName.getBytes("UTF-8");
+        byte[] fileNameLengthBytes = BytesUtil.shotToBytes(newName.length);
+        fileEntry.fileEntryHeader[LOCNAM] = fileNameLengthBytes[0];
+        fileEntry.fileEntryHeader[LOCNAM + 1] = fileNameLengthBytes[1];
+
         fileOutputStream.write(fileEntry.fileEntryHeader);
-        fileOutputStream.write(fileEntry.fileNameAndExtra);
+        //fileOutputStream.write(fileEntry.fileName);
+        fileEntry.size = fileEntry.size - fileEntry.fileName.length + newName.length;
+        fileOutputStream.write(newName);
+        fileOutputStream.write(fileEntry.extra);
         fileOutputStream.write(fileEntry.fileData);
         if (fileEntry.endOfFile != null) {
             fileOutputStream.write(fileEntry.endOfFile);
@@ -131,7 +141,7 @@ public class ZipSpliter {
 
     }
 
-    private static void writeCentralDir(FileOutputStream fileOutputStream, CentralDir centralDir) throws IOException {
+    private static void writeCentralDir(FileOutputStream fileOutputStream, CentralDir centralDir, String fileInTargetZip) throws IOException {
 
         //修正本地文件header的相对位移
         long headerOffset = 0;//由于是单文件，因此文件一定是第一个，则headerOffset就是0
@@ -141,8 +151,15 @@ public class ZipSpliter {
         centralDir.centralDir[CENOFF + 2] = headerOffsetBytes[2];
         centralDir.centralDir[CENOFF + 3] = headerOffsetBytes[3];
 
+        byte[] newName = fileInTargetZip.getBytes("UTF-8");
+        byte[] fileNameLengthBytes = BytesUtil.shotToBytes(newName.length);
+        centralDir.centralDir[CENNAM] = fileNameLengthBytes[0];
+        centralDir.centralDir[CENNAM + 1] = fileNameLengthBytes[1];
+
         fileOutputStream.write(centralDir.centralDir);
-        fileOutputStream.write(centralDir.nameBytes);
+        //fileOutputStream.write(centralDir.nameBytes);
+        centralDir.size = centralDir.size - centralDir.nameBytes.length + newName.length;
+        fileOutputStream.write(newName);
         fileOutputStream.write(centralDir.extraAndCommentBytes);
     }
 
@@ -174,8 +191,11 @@ public class ZipSpliter {
                 fileEntry[LOCEXT + 1]
         });
 
-        byte[] fileNameAndEtra = new byte[fileNameLength + extraLength];
-        randomAccessFile.readFully(fileNameAndEtra);
+        byte[] fileName = new byte[fileNameLength];
+        randomAccessFile.readFully(fileName);
+
+        byte[] extra = new byte[extraLength];
+        randomAccessFile.readFully(extra);
 
         byte[] fileData = new byte[intCompressedSize];
         randomAccessFile.readFully(fileData);
@@ -187,7 +207,7 @@ public class ZipSpliter {
             randomAccessFile.readFully(endOfFile);
         }
 
-        return new FileEntry(fileEntry, fileNameAndEtra, fileData, endOfFile);
+        return new FileEntry(fileEntry, fileName, extra, fileData, endOfFile);
     }
 
     private static boolean hasDataDescriptor(int genFlag) {
@@ -383,21 +403,24 @@ public class ZipSpliter {
 
     static class FileEntry {
         byte[] fileEntryHeader;
-        byte[] fileNameAndExtra;
+        byte[] fileName;
+        byte[] extra;
         byte[] fileData;
         byte[] endOfFile;
 
         long size;
 
         FileEntry(byte[] fileEntryHeader,
-                byte[] fileNameAndExtra,
+                byte[] fileName,
+                byte[] extra,
                 byte[] fileData,
                 byte[] endOfFile) {
             this.fileEntryHeader = fileEntryHeader;
-            this.fileNameAndExtra = fileNameAndExtra;
+            this.fileName = fileName;
+            this.extra = extra;
             this.fileData = fileData;
             this.endOfFile = endOfFile;
-            size = fileEntryHeader.length + fileNameAndExtra.length + fileData.length;
+            size = fileEntryHeader.length + fileName.length + extra.length + fileData.length;
             if (endOfFile != null) {
                 size = size + endOfFile.length;
             }
